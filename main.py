@@ -17,15 +17,23 @@ def parse_allocation(value):
         value = value.replace(',', '').replace('%', '').strip()
         return float(value)
     except ValueError:
-        # print(f"Cannot convert value: {value}")
         return None
 
-def get_allocation_value(row):
-    numeric_values = [parse_allocation(value) for value in row if parse_allocation(value) is not None]
-    for value in numeric_values:
-        if value < 1:
-            return value
-    return numeric_values[0] if numeric_values else 0.0
+def find_allocation_column(headers):
+    allocation_list = [
+        'Allocation', 
+        'final_share', 
+        'Allocation %', 
+        '% Allocation', 
+        'Allocation (%)',
+        'Allocation % ',
+        'RFP Allocation',
+        
+        ]
+    for header in allocation_list:
+        if header in headers:
+            return headers.index(header)
+    return None
 
 def process_csv_file(csv_path, wallet_addresses):
     wallet_allocations = {}
@@ -34,18 +42,28 @@ def process_csv_file(csv_path, wallet_addresses):
     with open(csv_path, 'r') as csvfile:
         reader = csv.reader(csvfile)
         headers = next(reader)
+
+        allocation_idx = find_allocation_column(headers)
+        if allocation_idx is None:
+            print(f"No 'Allocation' header in file: {csv_path}")
+            return wallet_allocations, total_allocation
+        
         for row in reader:
             if not any(row):
                 continue
             try:
                 address = row[0].strip().lower()
+    
                 if address in wallet_addresses:
-                    allocation_value = get_allocation_value(row[1:])
-                    if address in wallet_allocations:
-                        wallet_allocations[address] += allocation_value
-                    else:
-                        wallet_allocations[address] = allocation_value
-                    total_allocation += allocation_value
+                    allocation_value = parse_allocation(row[allocation_idx])
+                    if allocation_value is not None:
+                        if address in wallet_allocations:
+                            wallet_allocations[address] += allocation_value
+                        else:
+                            wallet_allocations[address] = allocation_value
+                        total_allocation += allocation_value
+
+
             except (IndexError, ValueError) as e:
                 print(f"Error processing row: {row}, error: {e}")
                 continue
@@ -58,17 +76,28 @@ def process_all_files(root_dir, wallet_addresses):
     total_allocation_dict = {}
 
     for subdir, _, files in os.walk(root_dir):
+        folder_name = os.path.basename(subdir)
+        folder_wallet_allocations = {}
+        folder_total_allocation = 0.0
+
         for file in files:
             if file.endswith('.csv'):
                 csv_path = os.path.join(subdir, file)
-                folder_name = os.path.basename(subdir)
                 print(f"Processing file: {csv_path}")
 
                 wallet_allocations, total_allocation = process_csv_file(csv_path, wallet_addresses)
 
-                if wallet_allocations:
-                    result_dict[folder_name] = wallet_allocations
-                    total_allocation_dict[folder_name] = f"{total_allocation:.12f}%"
+                for addr, alloc in wallet_allocations.items():
+                    if addr in folder_wallet_allocations:
+                        folder_wallet_allocations[addr] += float(alloc.rstrip('%'))
+                    else:
+                        folder_wallet_allocations[addr] = float(alloc.rstrip('%'))
+                
+                folder_total_allocation += total_allocation
+        
+        if folder_wallet_allocations:
+            result_dict[folder_name] = {addr: f"{alloc:.12f}%" for addr, alloc in folder_wallet_allocations.items()}
+            total_allocation_dict[folder_name] = f"{folder_total_allocation:.12f}%"
 
     return result_dict, total_allocation_dict
 
